@@ -11,21 +11,41 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    if (token && !user) {
-      API.get('/auth/me')
-        .then(res => {
-          setUser(res.data);
-          localStorage.setItem('user', JSON.stringify(res.data));
-        })
-        .catch(() => {
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-        })
-        .finally(() => setLoading(false));
-    } else {
+    if (!token) {
       setLoading(false);
+      return;
     }
+
+    let cancelled = false;
+    API.get('/auth/me')
+      .then(res => {
+        if (cancelled) return;
+        setUser(res.data);
+        localStorage.setItem('user', JSON.stringify(res.data));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const updateUser = (updates) => {
+    setUser(current => {
+      if (!current) return current;
+      const next = { ...current, ...updates };
+      localStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
+  };
 
   const login = async (email, password) => {
     const res = await API.post('/auth/login', { email, password });
@@ -50,7 +70,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, setup, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, setup, updateUser, loading }}>
       {children}
     </AuthContext.Provider>
   );

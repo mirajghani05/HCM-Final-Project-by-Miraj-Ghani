@@ -31,6 +31,7 @@ app.use('/api/holidays', require('./routes/holidays'));
 app.use('/api/employees', require('./routes/employees'));
 app.use('/api/employees/import', require('./routes/employeeImport'));
 app.use('/api/attendance', require('./routes/attendance'));
+app.use('/api/face', require('./routes/face'));
 app.use('/api/attendance-corrections', require('./routes/attendanceCorrections'));
 app.use('/api/leave', require('./routes/leave'));
 app.use('/api/payroll', require('./routes/payroll'));

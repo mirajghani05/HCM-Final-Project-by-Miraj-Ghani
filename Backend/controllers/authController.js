@@ -114,23 +114,45 @@ exports.login = async (req, res) => {
   }
 };
 
+const getNewPasswordError = (newPassword) => {
+  if (typeof newPassword !== 'string' || newPassword.length < 8) {
+    return 'New password must be at least 8 characters long';
+  }
+  if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword)) {
+    return 'New password must include both uppercase and lowercase letters';
+  }
+  if (!/\d/.test(newPassword)) {
+    return 'New password must include at least one number';
+  }
+  return null;
+};
+
 // Change password
 exports.changePassword = async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
+    const { currentPassword, newPassword, confirmPassword } = req.body;
     const user = await User.findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    const newPasswordError = getNewPasswordError(newPassword);
+    if (newPasswordError) {
+      return res.status(400).json({ message: newPasswordError });
+    }
+
+    if (confirmPassword !== undefined && newPassword !== confirmPassword) {
+      return res.status(400).json({ message: 'Passwords do not match' });
+    }
+
     if (!user.mustChangePassword) {
       if (!currentPassword) {
-        return res.status(400).json({ message: 'Current password required' });
+        return res.status(400).json({ message: 'Current password is required' });
       }
       const isMatch = await user.comparePassword(currentPassword);
       if (!isMatch) {
-        return res.status(401).json({ message: 'Current password incorrect' });
+        return res.status(400).json({ message: 'Current password is incorrect' });
       }
     }
 
@@ -138,7 +160,7 @@ exports.changePassword = async (req, res) => {
     user.mustChangePassword = false;
     await user.save();
 
-    res.json({ message: 'Password changed successfully' });
+    res.json({ message: 'Password changed successfully', mustChangePassword: false });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

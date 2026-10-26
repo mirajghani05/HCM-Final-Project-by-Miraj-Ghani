@@ -7,6 +7,88 @@ const LeaveBalance = require('../models/LeaveBalance');
 const PayrollRun = require('../models/PayrollRun');
 const AiLog = require('../models/AiLog');
 
+const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const GOOGLE_OPENAI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
+
+const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
+
+const getBaseHost = (value) => {
+  try {
+    return new URL(value).host;
+  } catch {
+    return '';
+  }
+};
+
+const getAIConfig = () => {
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  const apiKey = geminiKey || process.env.AI_API_KEY?.trim();
+
+  if (!apiKey) return null;
+
+  const rawBaseUrl = normalizeBaseUrl(process.env.AI_BASE_URL);
+  const baseHost = getBaseHost(rawBaseUrl);
+  const rawModel = String(process.env.AI_MODEL || '').trim();
+  const usesGoogleHost =
+    baseHost === 'aistudio.google.com' ||
+    baseHost === 'generativelanguage.googleapis.com';
+  const usingGemini =
+    Boolean(geminiKey) ||
+    usesGoogleHost ||
+    (!rawBaseUrl && rawModel.toLowerCase().startsWith('gemini'));
+
+  const baseUrl = normalizeBaseUrl(
+    usingGemini
+      ? process.env.GEMINI_BASE_URL || GOOGLE_OPENAI_BASE
+      : rawBaseUrl || 'https://openrouter.ai/api/v1'
+  );
+  const endpoint = baseUrl.endsWith('/chat/completions')
+    ? baseUrl
+    : `${baseUrl}/chat/completions`;
+
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  };
+
+  if (!usingGemini) {
+    headers['HTTP-Referer'] = process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173';
+    headers['X-Title'] = 'HCM Lite';
+  }
+
+  return {
+    endpoint,
+    headers,
+    provider: usingGemini ? 'gemini' : 'openai-compatible',
+    model: rawModel || (usingGemini ? DEFAULT_GEMINI_MODEL : 'google/gemini-2.5-flash'),
+    timeout: Number(process.env.AI_TIMEOUT_MS) || 30000
+  };
+};
+
+const requestAI = async (config, payload, timeout = config.timeout) => {
+  const send = (model) =>
+    axios.post(
+      config.endpoint,
+      { ...payload, model },
+      { headers: config.headers, timeout }
+    );
+
+  try {
+    return await send(payload.model || config.model);
+  } catch (error) {
+    const detail = JSON.stringify(error.response?.data || error.message || '');
+    const modelUnavailable =
+      /model/i.test(detail) &&
+      /(not found|not supported|invalid|does not exist|unknown)/i.test(detail);
+
+    if (config.provider === 'gemini' && modelUnavailable && payload.model !== DEFAULT_GEMINI_MODEL) {
+      return send(DEFAULT_GEMINI_MODEL);
+    }
+
+    throw error;
+  }
+};
+
 // Tools
 const tools = [
   {
@@ -176,25 +258,18 @@ Always use tools when asked for company/HR data. Answer concisely.`;
       { role: 'user', content: message }
     ];
 
-    if (!process.env.AI_API_KEY) {
-      return res.status(200).json({ response: "AI assistant is not configured. Please set AI_API_KEY in environment.", toolsUsed: [] });
+    const aiConfig = getAIConfig();
+    if (!aiConfig) {
+      return res.status(200).json({ response: "AI assistant is not configured. Set GEMINI_API_KEY (or AI_API_KEY and AI_BASE_URL) in the backend environment.", toolsUsed: [] });
     }
 
     // First call - decide tools
-    const response = await axios.post(process.env.AI_BASE_URL, {
-      model: process.env.AI_MODEL || 'google/gemini-2.5-flash',
+    const response = await requestAI(aiConfig, {
+      model: aiConfig.model,
       messages,
       tools,
       tool_choice: 'auto',
-      max_tokens: 500
-    }, {
-      headers: {
-        'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.FRONTEND_URL || 'http://localhost:5173',
-        'X-Title': 'HCM Lite'
-      },
-      timeout: 15000
+      max_tokens: 1200
     });
 
     let assistantMessage = response.data.choices[0].message;
@@ -224,18 +299,10 @@ Always use tools when asked for company/HR data. Answer concisely.`;
         });
       }
 
-      const response2 = await axios.post(process.env.AI_BASE_URL, {
-        model: process.env.AI_MODEL || 'google/gemini-2.5-flash',
+      const response2 = await requestAI(aiConfig, {
+        model: aiConfig.model,
         messages,
-        max_tokens: 500
-      }, {
-        headers: {
-          'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': process.env.FRONTEND_URL || 'http://localhost:5173',
-          'X-Title': 'HCM Lite'
-        },
-        timeout: 15000
+        max_tokens: 1200
       });
 
       assistantMessage = response2.data.choices[0].message;
@@ -258,29 +325,117 @@ Always use tools when asked for company/HR data. Answer concisely.`;
   }
 };
 
+const WEEKDAY_INDEX = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6
+};
+
+const formatLocalDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const inferLeaveType = (text) => {
+  const value = text.toLowerCase();
+  if (/\b(sick|ill|fever|medical|doctor|hospital)\b/.test(value)) return 'sick';
+  if (/\b(unpaid|without pay)\b/.test(value)) return 'unpaid';
+  if (/\b(annual|vacation|holiday|pto)\b/.test(value)) return 'annual';
+  return 'casual';
+};
+
+const parseSmartLeaveDates = (text, today = new Date()) => {
+  const value = text.toLowerCase();
+  const explicitDates = [...value.matchAll(/\b(\d{4}-\d{2}-\d{2})\b/g)].map((match) => match[1]);
+  if (explicitDates.length > 0) {
+    return { startDate: explicitDates[0], endDate: explicitDates[1] || explicitDates[0] };
+  }
+
+  const base = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (/\btomorrow\b/.test(value)) {
+    base.setDate(base.getDate() + 1);
+    const date = formatLocalDate(base);
+    return { startDate: date, endDate: date };
+  }
+  if (/\btoday\b/.test(value)) {
+    const date = formatLocalDate(base);
+    return { startDate: date, endDate: date };
+  }
+
+  const weekdays = [...value.matchAll(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/g)]
+    .map((match) => WEEKDAY_INDEX[match[1]]);
+  if (weekdays.length === 0) {
+    return { startDate: '', endDate: '' };
+  }
+
+  const nextWeek = /\bnext\b/.test(value);
+  let cursor = new Date(base);
+  const dates = [];
+
+  weekdays.forEach((targetDay, index) => {
+    let delta = (targetDay - cursor.getDay() + 7) % 7;
+    if (delta === 0 && (index === 0 ? nextWeek : true)) delta = 7;
+    cursor.setDate(cursor.getDate() + delta);
+    dates.push(formatLocalDate(cursor));
+  });
+
+  return { startDate: dates[0], endDate: dates[dates.length - 1] };
+};
+
+const buildSmartLeaveFallback = (text) => {
+  const dates = parseSmartLeaveDates(text);
+  return {
+    type: inferLeaveType(text),
+    startDate: dates.startDate,
+    endDate: dates.endDate,
+    reason: text
+  };
+};
+
+const normalizeSmartLeaveResult = (result, fallback) => {
+  const value = result && typeof result === 'object' ? result : {};
+  const type = ['annual', 'sick', 'casual', 'unpaid'].includes(value.type) ? value.type : fallback.type;
+  const startDate = /^\d{4}-\d{2}-\d{2}$/.test(value.startDate || '') ? value.startDate : fallback.startDate;
+  const endDate = /^\d{4}-\d{2}-\d{2}$/.test(value.endDate || '') ? value.endDate : fallback.endDate;
+  const reason = typeof value.reason === 'string' && value.reason.trim() ? value.reason.trim() : fallback.reason;
+
+  return { type, startDate, endDate: endDate || startDate, reason };
+};
+
 exports.smartLeave = async (req, res) => {
   try {
-    const { text } = req.body;
+    const text = String(req.body?.text || '').trim();
+    const aiConfig = getAIConfig();
+    const fallback = buildSmartLeaveFallback(text);
     
-    if (!process.env.AI_API_KEY) {
-      return res.json({ type: 'casual', startDate: '', endDate: '', reason: text });
+    if (!aiConfig) {
+      return res.json(fallback);
     }
 
+    const today = new Date();
+    const todayIso = formatLocalDate(today);
+    const todayName = today.toLocaleDateString('en-US', { weekday: 'long' });
+
     const callAI = async () => {
-      const response = await axios.post(process.env.AI_BASE_URL, {
-        model: process.env.AI_MODEL || 'google/gemini-2.5-flash',
+      const response = await requestAI(aiConfig, {
+        model: aiConfig.model,
         messages: [
-          { role: 'system', content: 'Extract leave details from natural language. Return ONLY valid JSON with keys: type (annual/sick/casual/unpaid), startDate (YYYY-MM-DD), endDate (YYYY-MM-DD), reason. Use current year context if dates mentioned. Do not include any other text.' },
+          {
+            role: 'system',
+            content:
+              `You extract leave requests. Today is ${todayIso} (${todayName}). Return ONLY minified JSON matching {"type":"annual|sick|casual|unpaid","startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","reason":"string"}. No markdown and no other text.`
+          },
           { role: 'user', content: text }
         ],
-        max_tokens: 200
-      }, {
-        headers: {
-          'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
-      });
+        max_tokens: 1500,
+        temperature: 0
+      }, aiConfig.timeout);
       return response.data.choices[0].message.content;
     };
 
@@ -289,55 +444,69 @@ exports.smartLeave = async (req, res) => {
       try {
         const json = JSON.parse(content.replace(/```json|```/g, '').trim());
         if (json.type && json.startDate && json.endDate) {
-          return res.json(json);
+          return res.json(normalizeSmartLeaveResult(json, fallback));
         }
         throw new Error('Invalid');
       } catch {
         content = await callAI();
         const json = JSON.parse(content.replace(/```json|```/g, '').trim());
-        return res.json(json);
+        return res.json(normalizeSmartLeaveResult(json, fallback));
       }
     } catch {
-      res.json({ type: 'casual', startDate: '', endDate: '', reason: text });
+      res.json(fallback);
     }
   } catch (error) {
-    res.json({ type: 'casual', startDate: '', endDate: '', reason: req.body.text });
+    res.json(buildSmartLeaveFallback(String(req.body?.text || '')));
   }
 };
 
 exports.summarize = async (req, res) => {
   try {
     const { kpis } = req.body;
-    if (!process.env.AI_API_KEY) {
+    const aiConfig = getAIConfig();
+    if (!aiConfig) {
       return res.json({ summary: ['Dashboard data loaded successfully'] });
     }
 
     const callAI = async () => {
-      const response = await axios.post(process.env.AI_BASE_URL, {
-        model: process.env.AI_MODEL || 'google/gemini-2.5-flash',
+      const response = await requestAI(aiConfig, {
+        model: aiConfig.model,
         messages: [
-          { role: 'system', content: 'You are a data analyst. Summarize dashboard KPIs in 3-5 bullet points. Use only the numbers provided. Label context as AI-generated insights.' },
+          {
+            role: 'system',
+            content:
+              'You are a data analyst. Summarize the supplied dashboard KPIs. Return one concise bullet per metric. Use only the numbers provided. Each line must start with "- ". Do not include a heading, bold text, or extra commentary.'
+          },
           { role: 'user', content: JSON.stringify(kpis) }
         ],
-        max_tokens: 200
-      }, {
-        headers: {
-          'Authorization': `Bearer ${process.env.AI_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
-      });
+        max_tokens: 1200
+      }, aiConfig.timeout);
       return response.data.choices[0].message.content;
     };
 
     try {
+      const parseBullets = (content) =>
+        String(content || '')
+          .replace(/\r/g, '')
+          .replace(/\*\*/g, '')
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => line.replace(/^[-*•]\s+/, '').replace(/^\d+[.)]\s+/, '').trim())
+          .filter(
+            (line) =>
+              line &&
+              !/^ai[- ]generated insights?:?$/i.test(line) &&
+              !/^(dashboard )?(insights|summary):?$/i.test(line)
+          );
+
       let content = await callAI();
-      let bullets = content.split('\n').filter(l => l.trim().match(/^[-*•]\s+/)).map(l => l.replace(/^[-*•]\s+/, '').trim());
+      let bullets = parseBullets(content);
       if (bullets.length === 0) {
         content = await callAI();
-        bullets = content.split('\n').filter(l => l.trim().match(/^[-*•]\s+/)).map(l => l.replace(/^[-*•]\s+/, '').trim());
+        bullets = parseBullets(content);
       }
-      res.json({ summary: bullets.length ? bullets : [content.trim()] });
+      res.json({ summary: bullets.length ? bullets.slice(0, 5) : ['No notable changes in the supplied metrics.'] });
     } catch {
       res.json({ summary: ['Unable to generate summary'] });
     }
