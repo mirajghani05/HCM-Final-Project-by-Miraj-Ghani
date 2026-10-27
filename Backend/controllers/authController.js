@@ -8,13 +8,26 @@ const generateToken = (id) => {
   });
 };
 
+const getPasswordError = (password) => {
+  if (typeof password !== 'string' || password.length < 8) {
+    return 'Password must be at least 8 characters long';
+  }
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password)) {
+    return 'Password must include both uppercase and lowercase letters';
+  }
+  if (!/\d/.test(password)) {
+    return 'Password must include at least one number';
+  }
+  return null;
+};
+
 // Check if first run setup needed
 exports.checkFirstRun = async (req, res) => {
   try {
-    const adminCount = await User.countDocuments({ role: 'admin' });
+    const userCount = await User.countDocuments();
     const settings = await CompanySettings.findOne();
     res.json({
-      needsSetup: adminCount === 0,
+      needsSetup: userCount === 0,
       setupComplete: settings?.setupComplete || false
     });
   } catch (error) {
@@ -25,37 +38,44 @@ exports.checkFirstRun = async (req, res) => {
 // First run setup - create company and admin
 exports.firstRunSetup = async (req, res) => {
   try {
-    const adminCount = await User.countDocuments({ role: 'admin' });
-    if (adminCount > 0) {
-      return res.status(400).json({ message: 'Admin already exists' });
+    const userCount = await User.countDocuments();
+    if (userCount > 0) {
+      return res.status(400).json({ message: 'Setup already completed' });
     }
 
-    const { companyName, adminEmail, adminPassword, firstName, lastName } = req.body;
+    const { companyName, adminEmail, adminPassword, firstName, lastName, email, password } = req.body;
 
-    if (!companyName || !adminEmail || !adminPassword) {
+    const companyNameValue = companyName || req.body.company || req.body.companyName;
+    const adminEmailValue = adminEmail || email;
+    const adminPasswordValue = adminPassword || password;
+
+    if (!companyNameValue || !adminEmailValue || !adminPasswordValue) {
       return res.status(400).json({ message: 'Please provide all required fields' });
     }
 
-    // Create company settings
+    const passwordError = getPasswordError(adminPasswordValue);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
+    }
+
     let settings = await CompanySettings.findOne();
     if (!settings) {
       settings = await CompanySettings.create({
-        companyName,
+        companyName: companyNameValue,
         setupComplete: true
       });
     } else {
-      settings.companyName = companyName;
+      settings.companyName = companyNameValue;
       settings.setupComplete = true;
       await settings.save();
     }
 
-    // Create admin user
     const admin = await User.create({
-      email: adminEmail,
-      password: adminPassword,
+      email: adminEmailValue,
+      password: adminPasswordValue,
       role: 'admin',
-      firstName,
-      lastName,
+      firstName: firstName || '',
+      lastName: lastName || '',
       mustChangePassword: false
     });
 

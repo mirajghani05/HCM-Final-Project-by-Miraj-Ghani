@@ -199,7 +199,7 @@ export default function Attendance() {
           </Card>
 
           {loading ? (
-            <TableSkeleton rows={8} columns={isEmployee ? 5 : 7} />
+            <TableSkeleton rows={8} columns={isEmployee ? 5 : 8} />
           ) : (
             <Card className="overflow-hidden">
               {paginated.length === 0 ? (
@@ -219,6 +219,7 @@ export default function Attendance() {
                           <th>Check in</th>
                           <th>Check out</th>
                           {!isEmployee ? <th>Face verification</th> : null}
+                          {!isEmployee ? <th>Location</th> : null}
                           <th>Status</th>
                           <th>Hours</th>
                         </tr>
@@ -246,7 +247,7 @@ export default function Attendance() {
                               <div className="flex items-center gap-2">
                                 {formatTime(record.checkIn)}
                                 {record.faceVerified ? (
-                                  <span title="Face and location verified" className="text-emerald-500">
+                                  <span title="Face verified" className="text-emerald-500">
                                     <ShieldCheck className="h-3.5 w-3.5" />
                                   </span>
                                 ) : null}
@@ -270,6 +271,19 @@ export default function Attendance() {
                                   </div>
                                 ) : (
                                   <Badge tone="neutral">Not verified</Badge>
+                                )}
+                              </td>
+                            ) : null}
+                            {!isEmployee ? (
+                              <td>
+                                {record.locationVerified === false ? (
+                                  <span title={record.locationReason || 'Location could not be verified'}>
+                                    <Badge tone="amber" dot>Flagged</Badge>
+                                  </span>
+                                ) : record.source === 'camera' || record.location ? (
+                                  <Badge tone="emerald" dot>Verified</Badge>
+                                ) : (
+                                  <span className="text-muted">-</span>
                                 )}
                               </td>
                             ) : null}

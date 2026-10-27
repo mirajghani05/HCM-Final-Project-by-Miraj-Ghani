@@ -4,18 +4,42 @@ const SalaryStructure = require('../models/SalaryStructure');
 const LeaveBalance = require('../models/LeaveBalance');
 const LeaveType = require('../models/LeaveType');
 const bcrypt = require('bcryptjs');
+const { sanitizePayload } = require('../utils/sanitize');
+
+const HR_PAYLOAD_RULES = {
+  strings: [
+    { key: 'email' },
+    { key: 'firstName' },
+    { key: 'lastName' }
+  ],
+  required: [
+    { key: 'email', label: 'Email' },
+    { key: 'password', label: 'Password' },
+    { key: 'firstName', label: 'First name' },
+    { key: 'lastName', label: 'Last name' }
+  ],
+  protectedFields: ['_id', '__v', 'role', 'employeeId', 'createdAt', 'updatedAt']
+};
 
 exports.createHR = async (req, res) => {
   try {
-    const { email, password, firstName, lastName } = req.body;
-    
-    const existingUser = await User.findOne({ email });
+    const { data, error } = await sanitizePayload(req.body, HR_PAYLOAD_RULES);
+    if (error) return res.status(400).json({ message: error });
+
+    const { email, password, firstName, lastName } = data;
+    const normalizedEmail = email.toLowerCase();
+
+    if (String(password).trim().length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    }
+
+    const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({ message: 'User already exists' });
     }
 
     const hr = await User.create({
-      email,
+      email: normalizedEmail,
       password,
       role: 'hr',
       firstName,
@@ -28,6 +52,13 @@ exports.createHR = async (req, res) => {
       user: { id: hr._id, email: hr.email, role: hr.role, firstName: hr.firstName, lastName: hr.lastName }
     });
   } catch (error) {
+    if (error.name === 'ValidationError') {
+      const message = Object.values(error.errors).map((item) => item.message).join(', ');
+      return res.status(400).json({ message });
+    }
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
     res.status(500).json({ message: error.message });
   }
 };

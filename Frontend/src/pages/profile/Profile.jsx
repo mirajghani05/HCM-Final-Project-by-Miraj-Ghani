@@ -111,7 +111,7 @@ export default function Profile() {
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-3">
-          <div className="space-y-4 xl:col-span-2">
+          <div className="min-w-0 space-y-4 xl:col-span-2">
             <Card className="relative overflow-hidden p-5 sm:p-6">
               <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-indigo-100/70 blur-3xl dark:bg-indigo-500/10" />
               <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
@@ -160,25 +160,25 @@ export default function Profile() {
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="flex items-start gap-3 rounded-xl bg-slate-50 p-3.5 dark:bg-slate-950/40">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-slate-50 p-3.5 dark:bg-slate-950/40">
                   <Mail className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-subtle">Email</p>
                     <p className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-white">{employee.email}</p>
                   </div>
                 </div>
-                <div className="flex items-start gap-3 rounded-xl bg-slate-50 p-3.5 dark:bg-slate-950/40">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-slate-50 p-3.5 dark:bg-slate-950/40">
                   <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-subtle">Phone</p>
                     <p className="mt-0.5 truncate text-sm font-medium text-slate-900 dark:text-white">{employee.phone || 'Not provided'}</p>
                   </div>
                 </div>
-                <div className="flex items-start gap-3 rounded-xl bg-slate-50 p-3.5 sm:col-span-2 dark:bg-slate-950/40">
+                <div className="flex min-w-0 items-start gap-3 rounded-xl bg-slate-50 p-3.5 sm:col-span-2 dark:bg-slate-950/40">
                   <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-subtle">Address</p>
-                    <p className="mt-0.5 text-sm font-medium leading-5 text-slate-900 dark:text-white">{employee.address || 'Not provided'}</p>
+                    <p className="mt-0.5 break-words text-sm font-medium leading-5 text-slate-900 dark:text-white">{employee.address || 'Not provided'}</p>
                   </div>
                 </div>
               </div>
@@ -187,7 +187,7 @@ export default function Profile() {
             <FaceEnrollment />
           </div>
 
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <Card className="p-5">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Employment</h3>
               <div className="mt-4 space-y-3">

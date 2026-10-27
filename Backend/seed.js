@@ -221,4 +221,12 @@ const seed = async () => {
   }
 };
 
+
+
+
+
+if (process.env.NODE_ENV === 'production') {
+  console.error('Refusing to run seed in production. Use the first-run setup flow to create the initial admin.');
+  process.exit(1);
+}
 seed();

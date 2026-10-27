@@ -21,6 +21,7 @@ import {
   EmptyState,
   Input,
   PageHeader,
+  Select,
   Skeleton
 } from '../../components/ui';
 
@@ -42,7 +43,9 @@ export default function Settings() {
     halfDayHours: 5,
     officeLat: '',
     officeLng: '',
-    officeRadius: 150
+    officeRadius: 150,
+    locationMode: 'soft',
+    faceMatchThreshold: 0.5
   });
   const [departments, setDepartments] = useState([]);
   const [leaveTypes, setLeaveTypes] = useState([]);
@@ -106,13 +109,21 @@ export default function Settings() {
       return;
     }
 
+    const faceMatchThreshold = Number(settings.faceMatchThreshold);
+    if (!Number.isFinite(faceMatchThreshold) || faceMatchThreshold <= 0 || faceMatchThreshold > 1.5) {
+      toast.error('Face match threshold must be greater than 0 and at most 1.5');
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
         ...settings,
         graceMinutes: Number(settings.graceMinutes),
         halfDayHours: Number(settings.halfDayHours),
-        officeRadius: radius
+        officeRadius: radius,
+        locationMode: settings.locationMode === 'strict' ? 'strict' : 'soft',
+        faceMatchThreshold
       };
       if (hasLat) {
         payload.officeLat = lat;
@@ -292,7 +303,8 @@ export default function Settings() {
                       <div>
                         <h3 className="text-xs font-semibold text-slate-900 dark:text-white">Camera attendance geofence</h3>
                         <p className="mt-0.5 text-[11px] leading-5 text-muted">
-                          Employees must be inside this radius to use face check-in.
+                          Soft mode records attendance even when GPS is missing or outside the radius, and flags it.
+                          Strict mode rejects check-in outside the radius.
                         </p>
                       </div>
                     </div>
@@ -342,6 +354,31 @@ export default function Settings() {
                       required
                     />
                   </div>
+
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <Select
+                      label="Location mode"
+                      name="locationMode"
+                      value={settings.locationMode || 'soft'}
+                      onChange={(event) => setSettings((current) => ({ ...current, locationMode: event.target.value }))}
+                      hint="Soft keeps attendance and flags location; strict rejects outside the geofence."
+                    >
+                      <option value="soft">Soft - record and flag</option>
+                      <option value="strict">Strict - reject outside radius</option>
+                    </Select>
+                    <Input
+                      label="Face match threshold (distance)"
+                      name="faceMatchThreshold"
+                      type="number"
+                      min="0.1"
+                      max="1.5"
+                      step="0.01"
+                      value={settings.faceMatchThreshold ?? 0.5}
+                      onChange={(event) => setSettings((current) => ({ ...current, faceMatchThreshold: event.target.value }))}
+                      hint="Default 0.5. Lower is stricter; failed matches return the real distance."
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-end">
@@ -388,6 +425,24 @@ export default function Settings() {
                 <Badge tone={hasOfficeLocation ? 'emerald' : 'amber'}>
                   {hasOfficeLocation ? `${settings.officeRadius || 150} m` : 'Not set'}
                 </Badge>
+              </div>
+              <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3.5 dark:bg-slate-950/40">
+                <span className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                  <ShieldCheck className="h-4 w-4 text-indigo-500" />
+                  Location mode
+                </span>
+                <Badge tone={settings.locationMode === 'strict' ? 'rose' : 'emerald'}>
+                  {settings.locationMode === 'strict' ? 'Strict' : 'Soft'}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between rounded-xl bg-slate-50 p-3.5 dark:bg-slate-950/40">
+                <span className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
+                  <ShieldCheck className="h-4 w-4 text-violet-500" />
+                  Face threshold
+                </span>
+                <span className="text-sm font-bold text-slate-900 dark:text-white">
+                  {Number(settings.faceMatchThreshold ?? 0.5).toFixed(2)}
+                </span>
               </div>
             </div>
             <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3.5 text-xs leading-5 text-indigo-900/70 dark:border-indigo-500/20 dark:bg-indigo-500/5 dark:text-indigo-200/70">

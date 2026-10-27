@@ -144,3 +144,32 @@ For production, use HTTPS, define a biometric-data retention/re-enrollment polic
 - AI tools respect role permissions
 - Responsive design
 - Ready for hackathon demo
+
+## First-run setup and production
+- First-run setup: If no users exist, go to /setup (or the login page shows Create your company account) to create the company and the first Admin. The backend rejects setup if any user already exists.
+- Users: Admin can create HR users. Admin and HR can create employees with a temporary password and mustChangePassword=true.
+- Seed (demo only): Backend/seed.js is for local demo data only. It refuses to run when NODE_ENV=production. In production, use first-run setup instead of seeding demo accounts.
+
+## Deploy
+
+### Backend on Render
+1. Create a MongoDB Atlas cluster, database user, and database. Under Atlas **Network Access**, allow Render (for example `0.0.0.0/0`, or Render's static IPs).
+2. In Render choose **New → Web Service** and connect this repository.
+3. Set **Root Directory** to `Backend`, **Runtime** to `Node`, **Build Command** to `npm install`, **Start Command** to `npm start`, and **Health Check Path** to `/api/health`.
+4. Add these environment variables (Render provides `PORT` automatically):
+   - `MONGO_URI` = `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/hcm-lite`
+   - `JWT_SECRET` = a long random secret
+   - `JWT_EXPIRE` = `7d`
+   - `NODE_ENV` = `production`
+   - `CLIENT_URL` = `https://your-frontend.vercel.app` (comma-separate multiple origins, e.g. preview URLs)
+   - `GEMINI_API_KEY` = your Google AI Studio key
+   - `AI_MODEL` = `gemini-3.1-flash-lite`
+   - `AI_TIMEOUT_MS` = `30000`
+5. Deploy. Do **not** run `npm run seed` in production. On first visit, use the frontend `/setup` page to create the company and first Admin.
+
+### Frontend on Vercel
+1. In Vercel choose **Add New → Project** and import this repository.
+2. Set **Root Directory** to `Frontend`, framework preset **Vite**, **Build Command** `npm run build`, **Output Directory** `dist`.
+3. Add `VITE_API_URL` = `https://your-backend.onrender.com/api` for Production and Preview.
+4. Deploy. `vercel.json` rewrites all routes to `/index.html` so React Router deep links work. Redeploy after changing environment variables.
+5. Camera attendance requires HTTPS, which both Vercel and Render provide.

@@ -1,7 +1,8 @@
 const FaceProfile = require('../models/FaceProfile');
+const CompanySettings = require('../models/CompanySettings');
 
 const DESCRIPTOR_LENGTH = 128;
-const MATCH_THRESHOLD = 0.5;
+const DEFAULT_MATCH_THRESHOLD = 0.5;
 
 const validationError = (message) => {
   const error = new Error(message);
@@ -51,8 +52,8 @@ const validateLiveness = (body) => {
   if (!['blink', 'head_turn'].includes(livenessMethod)) {
     throw validationError('A valid liveness challenge is required');
   }
-  if (!Number.isFinite(steadyMs) || steadyMs < 2000) {
-    throw validationError('Hold your face steady for at least 2 seconds');
+  if (!Number.isFinite(steadyMs) || steadyMs < 1000) {
+    throw validationError('Hold your face steady for at least 1 second');
   }
 
   return { livenessPassed, livenessMethod, steadyMs };
@@ -97,14 +98,20 @@ const getFaceStatus = async (employeeId) => {
 const verifyFaceDescriptor = async (employeeId, descriptor) => {
   const normalized = normalizeDescriptor(descriptor);
   const profile = await FaceProfile.findOne({ employee: employeeId }).select('+descriptor');
+  const settings = await CompanySettings.findOne();
 
   if (!profile) {
     throw validationError('Face enrollment required before camera attendance. Enroll your face from Profile.');
   }
 
+  const threshold = Number(settings?.faceMatchThreshold);
+  const matchThreshold = Number.isFinite(threshold) && threshold > 0 && threshold <= 1.5
+    ? threshold
+    : DEFAULT_MATCH_THRESHOLD;
+
   const distance = euclideanDistance(normalized, profile.descriptor);
   const confidence = toConfidence(distance);
-  const matched = distance <= MATCH_THRESHOLD;
+  const matched = distance <= matchThreshold;
 
   if (matched) {
     profile.lastVerifiedAt = new Date();
@@ -115,13 +122,14 @@ const verifyFaceDescriptor = async (employeeId, descriptor) => {
   return {
     matched,
     distance: Math.round(distance * 10000) / 10000,
-    confidence
+    confidence,
+    threshold: matchThreshold
   };
 };
 
 module.exports = {
   DESCRIPTOR_LENGTH,
-  MATCH_THRESHOLD,
+  MATCH_THRESHOLD: DEFAULT_MATCH_THRESHOLD,
   normalizeDescriptor,
   validateLiveness,
   enrollFace,

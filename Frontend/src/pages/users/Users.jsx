@@ -27,6 +27,7 @@ import {
   TableSkeleton
 } from '../../components/ui';
 import { formatDate, initials, roleLabel } from '../../utils/format';
+import { buildUserPayload } from '../../utils/payload';
 
 const roleTones = {
   admin: 'violet',
@@ -81,7 +82,7 @@ export default function Users() {
     }
     setSubmitting(true);
     try {
-      await API.post('/users/hr', formData);
+      await API.post('/users/hr', buildUserPayload(formData));
       toast.success('HR user created');
       setShowForm(false);
       setFormData(emptyForm);

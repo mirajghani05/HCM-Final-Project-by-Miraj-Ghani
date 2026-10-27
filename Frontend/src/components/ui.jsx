@@ -135,6 +135,30 @@ export function Card({ className, children, ...props }) {
   );
 }
 
+export function CardHeader({ className, children, ...props }) {
+  return (
+    <div className={cx('border-b border-slate-200/70 px-4 py-3 sm:px-5 dark:border-slate-800/70', className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
+export function CardTitle({ className, children, ...props }) {
+  return (
+    <h2 className={cx('text-sm font-semibold text-slate-900 dark:text-white', className)} {...props}>
+      {children}
+    </h2>
+  );
+}
+
+export function CardContent({ className, children, ...props }) {
+  return (
+    <div className={cx('p-4 sm:p-5', className)} {...props}>
+      {children}
+    </div>
+  );
+}
+
 export function PageHeader({ eyebrow, title, description, actions, icon: Icon }) {
   return (
     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -443,7 +467,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
         aria-modal="true"
         aria-label={title}
         className={cx(
-          'relative flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl animate-slide-up sm:rounded-3xl dark:border-slate-800 dark:bg-slate-900',
+          'relative flex max-h-[92vh] w-full min-w-0 flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl animate-slide-up sm:rounded-3xl dark:border-slate-800 dark:bg-slate-900',
           modalSizes[size] || modalSizes.md
         )}
       >

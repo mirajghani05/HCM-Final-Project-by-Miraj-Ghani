@@ -18,7 +18,12 @@ exports.updateSettings = async (req, res) => {
     if (!settings) {
       settings = await CompanySettings.create(req.body);
     } else {
-      Object.assign(settings, req.body);
+      const allowed = ['companyName', 'officeStartTime', 'graceMinutes', 'weekendDays', 'halfDayHours', 'officeLat', 'officeLng', 'officeRadius', 'setupComplete', 'locationMode', 'faceMatchThreshold'];
+      for (const key of allowed) {
+        if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+          settings[key] = req.body[key];
+        }
+      }
       await settings.save();
     }
     res.json(settings);
@@ -26,3 +31,4 @@ exports.updateSettings = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+

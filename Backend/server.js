@@ -10,10 +10,24 @@ const app = express();
 // Connect DB
 connectDB();
 
+const normalizeOrigin = (origin) => origin.trim().replace(/\/+$/, '');
+
+const configuredOrigins = String(process.env.CLIENT_URL || '')
+  .split(',')
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+const devOrigins = process.env.NODE_ENV === 'production'
+  ? []
+  : ['http://localhost:5173', 'http://localhost:5174'];
+
+const allowedOrigins = [...new Set([...configuredOrigins, ...devOrigins])];
+
 // Middleware
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
-  origin: [process.env.CLIENT_URL, 'http://localhost:5173', 'http://localhost:5174'],
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' }));

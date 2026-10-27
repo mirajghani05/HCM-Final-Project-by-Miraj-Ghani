@@ -1,13 +1,62 @@
 const Employee = require('../models/Employee');
 const User = require('../models/User');
+const Department = require('../models/Department');
+const Designation = require('../models/Designation');
 const SalaryStructure = require('../models/SalaryStructure');
 const LeaveBalance = require('../models/LeaveBalance');
 const LeaveType = require('../models/LeaveType');
+const { sanitizePayload } = require('../utils/sanitize');
 const csv = require('csv-parser');
 const fs = require('fs');
 const multer = require('multer');
 
 const upload = multer({ dest: 'uploads/' });
+
+const EMPLOYEE_PAYLOAD_RULES = {
+  objectIds: [
+    { key: 'department', label: 'Department', model: Department },
+    { key: 'designation', label: 'Designation', model: Designation }
+  ],
+  strings: [
+    { key: 'firstName' },
+    { key: 'lastName' },
+    { key: 'email' },
+    { key: 'phone' },
+    { key: 'address' }
+  ],
+  dates: [
+    { key: 'dateOfBirth', label: 'Date of birth' },
+    { key: 'joinDate', label: 'Join date' }
+  ],
+  enums: [
+    { key: 'gender', label: 'Gender', values: ['male', 'female', 'other'] },
+    { key: 'employmentType', label: 'Employment type', values: ['full-time', 'part-time', 'contract'] },
+    { key: 'status', label: 'Status', values: ['active', 'probation', 'terminated', 'resigned'] }
+  ],
+  protectedFields: ['_id', '__v', 'employeeId', 'createdAt', 'updatedAt']
+};
+
+const CREATE_REQUIRED_FIELDS = [
+  { key: 'firstName', label: 'First name' },
+  { key: 'lastName', label: 'Last name' },
+  { key: 'email', label: 'Email' },
+  { key: 'joinDate', label: 'Join date' }
+];
+
+const handleEmployeeError = (res, error) => {
+  if (error.name === 'ValidationError') {
+    const message = Object.values(error.errors).map((item) => item.message).join(', ');
+    return res.status(400).json({ message });
+  }
+  if (error.name === 'CastError') {
+    return res.status(400).json({ message: `Invalid value for ${error.path}` });
+  }
+  if (error.code === 11000) {
+    return res.status(400).json({ message: 'Employee with this email already exists' });
+  }
+  return res.status(500).json({ message: error.message });
+};
+
 
 // Generate employee ID
 const generateEmployeeId = async () => {
@@ -76,8 +125,14 @@ exports.getEmployee360 = async (req, res) => {
 
 exports.createEmployee = async (req, res) => {
   try {
-    const { email, password, basicSalary, ...empData } = req.body;
-    
+    const { data, error } = await sanitizePayload(req.body, {
+      ...EMPLOYEE_PAYLOAD_RULES,
+      required: CREATE_REQUIRED_FIELDS
+    });
+    if (error) return res.status(400).json({ message: error });
+
+    const { email, password, basicSalary, ...empData } = data;
+
     const existingEmp = await Employee.findOne({ email });
     if (existingEmp) {
       return res.status(400).json({ message: 'Employee with this email already exists' });
@@ -128,18 +183,25 @@ exports.createEmployee = async (req, res) => {
     await employee.populate('department designation');
     res.status(201).json({ employee, tempPassword, message: 'Employee created successfully' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleEmployeeError(res, error);
   }
 };
 
 exports.updateEmployee = async (req, res) => {
   try {
-    const employee = await Employee.findByIdAndUpdate(req.params.id, req.body, { new: true })
+    const { data, error } = await sanitizePayload(req.body, EMPLOYEE_PAYLOAD_RULES);
+    if (error) return res.status(400).json({ message: error });
+
+    const employee = await Employee.findByIdAndUpdate(req.params.id, data, {
+      new: true,
+      runValidators: true
+    })
       .populate('department')
       .populate('designation');
+    if (!employee) return res.status(404).json({ message: 'Employee not found' });
     res.json(employee);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleEmployeeError(res, error);
   }
 };
 

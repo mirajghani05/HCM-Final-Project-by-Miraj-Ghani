@@ -13,7 +13,7 @@ import {
   UsersRound
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import API from '../../services/api';
+import API, { API_BASE_URL } from '../../services/api';
 import {
   Badge,
   Button,
@@ -30,6 +30,7 @@ import {
   cx
 } from '../../components/ui';
 import { formatDate, initials, titleCase } from '../../utils/format';
+import { buildEmployeePayload } from '../../utils/payload';
 
 const emptyForm = {
   firstName: '',
@@ -99,9 +100,10 @@ export default function Employees() {
     event.preventDefault();
     setSubmitting(true);
     try {
-      const res = await API.post('/employees', formData);
+      const payload = buildEmployeePayload(formData);
+      const res = await API.post('/employees', payload);
       setTempCredentials({
-        email: formData.email,
+        email: payload.email,
         password: res.data.tempPassword
       });
       toast.success('Employee created and login generated');
@@ -203,7 +205,7 @@ export default function Employees() {
             <Button
               variant="secondary"
               icon={Download}
-              onClick={() => window.open('http://localhost:5000/api/employees/export', '_blank')}
+              onClick={() => window.open(`${API_BASE_URL}/employees/export`, '_blank')}
             >
               Export
             </Button>

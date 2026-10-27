@@ -9,6 +9,8 @@ const attendanceSchema = new mongoose.Schema({
   hoursWorked: { type: Number, default: 0 },
   source: { type: String, enum: ['web', 'camera'], default: 'web' },
   location: { lat: Number, lng: Number, accuracy: Number, distance: Number, allowedDistance: Number },
+  locationVerified: { type: Boolean, default: true },
+  locationReason: String,
   faceVerified: { type: Boolean, default: false },
   faceConfidence: Number,
   faceDistance: Number,
@@ -23,9 +25,13 @@ const attendanceSchema = new mongoose.Schema({
   checkOutLivenessPassed: Boolean,
   checkOutLivenessMethod: { type: String, enum: ['blink', 'head_turn'] },
   checkOutLivenessSteadyMs: Number,
+  checkOutLocation: { lat: Number, lng: Number, accuracy: Number, distance: Number, allowedDistance: Number },
+  checkOutLocationVerified: { type: Boolean, default: true },
+  checkOutLocationReason: String,
   remarks: String
 }, { timestamps: true });
 
 attendanceSchema.index({ employee: 1, date: 1 }, { unique: true });
 
 module.exports = mongoose.model('Attendance', attendanceSchema);
+
