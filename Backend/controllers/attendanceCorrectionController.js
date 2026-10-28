@@ -64,7 +64,7 @@ exports.approveCorrection = async (req, res) => {
     correction.status = 'approved';
     correction.reviewedBy = req.user.id;
     correction.reviewedAt = new Date();
-    correction.reviewComment = req.body.comment || '';
+    correction.reviewComment = req.body?.comment ?? '';
     await correction.save();
     
     res.json({ message: 'Correction approved', correction });
@@ -82,7 +82,7 @@ exports.rejectCorrection = async (req, res) => {
     correction.status = 'rejected';
     correction.reviewedBy = req.user.id;
     correction.reviewedAt = new Date();
-    correction.reviewComment = req.body.comment || '';
+    correction.reviewComment = req.body?.comment ?? '';
     await correction.save();
     
     res.json({ message: 'Correction rejected', correction });

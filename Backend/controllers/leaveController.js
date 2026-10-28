@@ -115,7 +115,7 @@ exports.approveLeave = async (req, res) => {
     leaveRequest.status = 'approved';
     leaveRequest.approvedBy = req.user.id;
     leaveRequest.approvedAt = new Date();
-    leaveRequest.approvalComment = req.body.comment || '';
+    leaveRequest.approvalComment = req.body?.comment ?? '';
     await leaveRequest.save();
     
     // Update balance
@@ -160,7 +160,8 @@ exports.rejectLeave = async (req, res) => {
     leaveRequest.status = 'rejected';
     leaveRequest.approvedBy = req.user.id;
     leaveRequest.approvedAt = new Date();
-    leaveRequest.approvalComment = req.body.comment || '';
+    const comment = req.body?.comment ?? '';
+    leaveRequest.approvalComment = comment;
     await leaveRequest.save();
     
     const user = await User.findOne({ employeeId: leaveRequest.employee });
@@ -168,7 +169,7 @@ exports.rejectLeave = async (req, res) => {
       await Notification.create({
         user: user._id,
         title: 'Leave Rejected',
-        message: `Your leave request has been rejected. ${req.body.comment || ''}`,
+        message: `Your leave request has been rejected. ${comment}`,
         type: 'error'
       });
     }
