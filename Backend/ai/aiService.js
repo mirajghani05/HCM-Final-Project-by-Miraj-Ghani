@@ -267,13 +267,20 @@ const executeTool = async (toolName, args, user) => {
 
     case 'get_attendance_summary': {
       try {
-        const today = new Date();
-        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
-        const start = args?.startDate ? new Date(args.startDate) : startOfDay;
-        const end = args?.endDate ? new Date(args.endDate) : endOfDay;
-        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-          return { error: 'Invalid date range' };
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        let start = startOfDay;
+        let end = endOfDay;
+        const hasExplicitRange = args?.startDate || args?.endDate;
+        if (hasExplicitRange) {
+          const s = args?.startDate ? new Date(args.startDate) : startOfDay;
+          const e = args?.endDate ? new Date(args.endDate) : endOfDay;
+          if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
+            return { error: 'Invalid date range' };
+          }
+          start = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+          end = new Date(e.getFullYear(), e.getMonth(), e.getDate(), 23, 59, 59, 999);
         }
         const attQuery = { date: { $gte: start, $lte: end } };
         if (user.role === 'employee') {
@@ -286,7 +293,18 @@ const executeTool = async (toolName, args, user) => {
         const halfDay = attendance.filter(a => a.status === 'half_day').length;
         const absent = attendance.filter(a => a.status === 'absent').length;
         const onLeave = attendance.filter(a => a.status === 'on_leave').length;
-        return { total: attendance.length, present, late, halfDay, absent, onLeave, startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), scope: user.role };
+        return {
+          total: attendance.length,
+          present,
+          late,
+          halfDay,
+          absent,
+          onLeave,
+          startDate: start.toISOString().slice(0, 10),
+          endDate: end.toISOString().slice(0, 10),
+          scope: user.role,
+          serverDate: now.toISOString().slice(0, 10)
+        };
       } catch (e) {
         return { error: 'Unable to fetch attendance summary' };
       }
@@ -342,14 +360,16 @@ exports.chat = async (req, res) => {
     const { message, history = [] } = req.body;
     const user = await User.findById(req.user.id).populate('employeeId');
     
+        const serverToday = new Date();
     const systemPrompt = `You are an AI assistant for HCM Lite HR system. You must ONLY answer using tools and data from the system. NEVER guess or make up data.
+Server current date is ${serverToday.getFullYear()}-${String(serverToday.getMonth()+1).padStart(2,'0')}-${String(serverToday.getDate()).padStart(2,'0')} (UTC context) in the server timezone; use this when asked for "today". Do NOT invent past/future dates.
 You understand English and Roman Urdu/Hindi mix. If user writes in Roman Urdu (e.g., "kitne employees hain", "mujhe batao"), respond naturally in Roman Urdu or English as appropriate.
 Rules: Office hours 09:00, grace 15 min, late after 09:15, half day under 5 hours. 
 Leave quotas: Annual 14, Sick 8, Casual 10, Unpaid unlimited. Working days exclude weekends (Sat-Sun) and holidays.
 You must respect role-based access strictly. 
 If an employee asks about another employee's salary, compensation, or private financial data - politely refuse and say you can only share their own information.
 If asked for data you don't have tools for or not authorized - say so politely.
-Always use tools when asked for company/HR data. Answer concisely.`;
+Always use tools when asked for company/HR data. Answer concisely. For attendance summaries, prefer calling get_attendance_summary without guessing dates; if the user explicitly says "today", call it without startDate/endDate so the server uses the current date.`;
 
     const messages = [
       { role: 'system', content: systemPrompt },
