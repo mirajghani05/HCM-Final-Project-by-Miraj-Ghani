@@ -254,22 +254,43 @@ const executeTool = async (toolName, args, user) => {
   }
 
   switch (toolName) {
-    case 'get_headcount':
-      const countQuery = { status: { $in: ['active', 'probation'] } };
-      if (args.departmentId) countQuery.department = args.departmentId;
-      const count = await Employee.countDocuments(countQuery);
-      return { count, scope: user.role };
-
-    case 'get_attendance_summary':
-      const start = new Date(args.startDate);
-      const end = new Date(args.endDate);
-      const attQuery = { date: { $gte: start, $lte: end } };
-      if (user.role === 'employee') {
-        attQuery.employee = user.employeeId;
+    case 'get_headcount': {
+      try {
+        const countQuery = { status: { $in: ['active', 'probation'] } };
+        if (args?.departmentId) countQuery.department = args.departmentId;
+        const count = await Employee.countDocuments(countQuery);
+        return { count, scope: user.role };
+      } catch (e) {
+        return { error: 'Unable to fetch headcount' };
       }
-      const attendance = await Attendance.find(attQuery);
-      const present = attendance.filter(a => ['present', 'late', 'half_day'].includes(a.status)).length;
-      return { total: attendance.length, present, late: attendance.filter(a => a.status === 'late').length, halfDay: attendance.filter(a => a.status === 'half_day').length };
+    }
+
+    case 'get_attendance_summary': {
+      try {
+        const today = new Date();
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+        const start = args?.startDate ? new Date(args.startDate) : startOfDay;
+        const end = args?.endDate ? new Date(args.endDate) : endOfDay;
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+          return { error: 'Invalid date range' };
+        }
+        const attQuery = { date: { $gte: start, $lte: end } };
+        if (user.role === 'employee') {
+          if (!user.employeeId) return { error: 'No employee record linked' };
+          attQuery.employee = user.employeeId;
+        }
+        const attendance = await Attendance.find(attQuery);
+        const present = attendance.filter(a => ['present', 'late', 'half_day'].includes(a.status)).length;
+        const late = attendance.filter(a => a.status === 'late').length;
+        const halfDay = attendance.filter(a => a.status === 'half_day').length;
+        const absent = attendance.filter(a => a.status === 'absent').length;
+        const onLeave = attendance.filter(a => a.status === 'on_leave').length;
+        return { total: attendance.length, present, late, halfDay, absent, onLeave, startDate: start.toISOString().slice(0, 10), endDate: end.toISOString().slice(0, 10), scope: user.role };
+      } catch (e) {
+        return { error: 'Unable to fetch attendance summary' };
+      }
+    }
 
     case 'get_late_comers':
       const today = new Date();
@@ -370,11 +391,21 @@ Always use tools when asked for company/HR data. Answer concisely.`;
       // Second call with results
       messages.push(assistantMessage);
       for (let tr of toolResults) {
-        messages.push({
-          role: 'tool',
-          tool_call_id: assistantMessage.tool_calls[toolResults.indexOf(tr)].id,
-          content: JSON.stringify(tr.result)
-        });
+        const toolCallId = assistantMessage.tool_calls && assistantMessage.tool_calls[toolResults.indexOf(tr)]
+          ? assistantMessage.tool_calls[toolResults.indexOf(tr)].id
+          : undefined;
+        if (toolCallId) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCallId,
+            content: JSON.stringify(tr.result)
+          });
+        } else {
+          messages.push({
+            role: 'tool',
+            content: JSON.stringify(tr.result)
+          });
+        }
       }
 
       const response2 = await requestAI(aiConfig, {
