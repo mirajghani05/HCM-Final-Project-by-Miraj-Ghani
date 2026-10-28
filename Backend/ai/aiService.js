@@ -8,6 +8,7 @@ const PayrollRun = require('../models/PayrollRun');
 const AiLog = require('../models/AiLog');
 
 const DEFAULT_GEMINI_MODEL = 'gemini-3.1-flash-lite';
+const DEFAULT_GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash-lite';
 const GOOGLE_OPENAI_BASE = 'https://generativelanguage.googleapis.com/v1beta/openai';
 
 const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
@@ -20,6 +21,8 @@ const getBaseHost = (value) => {
   }
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const getAIConfig = () => {
   const geminiKey = process.env.GEMINI_API_KEY?.trim();
   const apiKey = geminiKey || process.env.AI_API_KEY?.trim();
@@ -29,6 +32,8 @@ const getAIConfig = () => {
   const rawBaseUrl = normalizeBaseUrl(process.env.AI_BASE_URL);
   const baseHost = getBaseHost(rawBaseUrl);
   const rawModel = String(process.env.AI_MODEL || '').trim();
+  const rawFallbackModel =
+    String(process.env.AI_MODEL_FALLBACK || process.env.GEMINI_MODEL_FALLBACK || '').trim();
   const usesGoogleHost =
     baseHost === 'aistudio.google.com' ||
     baseHost === 'generativelanguage.googleapis.com';
@@ -56,16 +61,49 @@ const getAIConfig = () => {
     headers['X-Title'] = 'HCM Lite';
   }
 
+  const primaryModel = rawModel || (usingGemini ? DEFAULT_GEMINI_MODEL : 'google/gemini-2.5-flash');
+  let fallbackModel = rawFallbackModel;
+  if (!fallbackModel) {
+    if (usingGemini) {
+      fallbackModel = primaryModel === DEFAULT_GEMINI_FALLBACK_MODEL ? DEFAULT_GEMINI_MODEL : DEFAULT_GEMINI_FALLBACK_MODEL;
+    } else {
+      fallbackModel = 'google/gemini-2.5-flash-lite';
+    }
+  }
+
   return {
     endpoint,
     headers,
     provider: usingGemini ? 'gemini' : 'openai-compatible',
-    model: rawModel || (usingGemini ? DEFAULT_GEMINI_MODEL : 'google/gemini-2.5-flash'),
-    timeout: Number(process.env.AI_TIMEOUT_MS) || 30000
+    model: primaryModel,
+    fallbackModel,
+    timeout: Number(process.env.AI_TIMEOUT_MS) || 30000,
+    maxRetries: Math.max(0, Number(process.env.AI_MAX_RETRIES) || 2)
   };
 };
 
+const isRetryableError = (error) => {
+  const status = error.response?.status;
+  if (status === 429 || status === 503 || status === 502 || status === 504) {
+    return true;
+  }
+  const detail = JSON.stringify(error.response?.data || error.message || '').toLowerCase();
+  if (detail.includes('high demand') || detail.includes('unavailable') || detail.includes('rate limit') || detail.includes('overloaded')) {
+    return true;
+  }
+  return false;
+};
+
+const isModelUnavailableError = (error) => {
+  const detail = JSON.stringify(error.response?.data || error.message || '').toLowerCase();
+  return /model/.test(detail) && /(not found|not supported|invalid|does not exist|unknown)/.test(detail);
+};
+
 const requestAI = async (config, payload, timeout = config.timeout) => {
+  const primaryModel = payload.model || config.model;
+  const fallbackModel = config.fallbackModel;
+  const maxRetries = typeof config.maxRetries === 'number' ? config.maxRetries : 2;
+
   const send = (model) =>
     axios.post(
       config.endpoint,
@@ -73,18 +111,58 @@ const requestAI = async (config, payload, timeout = config.timeout) => {
       { headers: config.headers, timeout }
     );
 
-  try {
-    return await send(payload.model || config.model);
-  } catch (error) {
-    const detail = JSON.stringify(error.response?.data || error.message || '');
-    const modelUnavailable =
-      /model/i.test(detail) &&
-      /(not found|not supported|invalid|does not exist|unknown)/i.test(detail);
-
-    if (config.provider === 'gemini' && modelUnavailable && payload.model !== DEFAULT_GEMINI_MODEL) {
-      return send(DEFAULT_GEMINI_MODEL);
+  const tryWithRetries = async (model) => {
+    let lastError;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await send(model);
+      } catch (error) {
+        lastError = error;
+        if (isRetryableError(error) && attempt < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 4000);
+          await sleep(delay);
+          continue;
+        }
+        throw error;
+      }
     }
+    throw lastError;
+  };
 
+  try {
+    try {
+      return await tryWithRetries(primaryModel);
+    } catch (error) {
+      if (config.provider === 'gemini') {
+        if (isModelUnavailableError(error) && primaryModel !== DEFAULT_GEMINI_MODEL) {
+          try {
+            return await tryWithRetries(DEFAULT_GEMINI_MODEL);
+          } catch (e2) {
+            if (fallbackModel && fallbackModel !== DEFAULT_GEMINI_MODEL && fallbackModel !== primaryModel) {
+              return await tryWithRetries(fallbackModel);
+            }
+            throw e2;
+          }
+        }
+        if ((isRetryableError(error) || isModelUnavailableError(error)) && fallbackModel && fallbackModel !== primaryModel) {
+          try {
+            return await tryWithRetries(fallbackModel);
+          } catch (e2) {
+            throw e2;
+          }
+        }
+      } else if (fallbackModel && fallbackModel !== primaryModel) {
+        if (isRetryableError(error) || isModelUnavailableError(error)) {
+          try {
+            return await tryWithRetries(fallbackModel);
+          } catch (e2) {
+            throw e2;
+          }
+        }
+      }
+      throw error;
+    }
+  } catch (error) {
     throw error;
   }
 };
@@ -320,7 +398,9 @@ Always use tools when asked for company/HR data. Answer concisely.`;
 
     res.json({ response: assistantMessage.content, toolsUsed, aiGenerated: true });
   } catch (error) {
-    console.error('AI error:', error.response?.data || error.message);
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('AI error');
+    }
     res.json({ response: "I'm having trouble processing that right now. Please try again or use the dashboard.", toolsUsed: [], aiGenerated: true });
   }
 };
